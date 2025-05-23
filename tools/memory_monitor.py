@@ -246,16 +246,26 @@ class MemoryMonitor:
     def _monitor_memory(self):
         while not self._monitoring_thread_should_stop:
             _last_measurement_time = time.perf_counter()
-            if self.memory_type == MemoryType.RSS:
-                bytes_used = psutil.Process().memory_info().rss
-                if self.include_child_processes:
-                    for child_process in psutil.Process().children(recursive=True):
-                        bytes_used += psutil.Process(child_process.pid).memory_info().rss
-            elif self.memory_type == MemoryType.SYSTEM:
-                bytes_used = psutil.virtual_memory().total - psutil.virtual_memory().available
-            else:
-                msg = "Unknown memory type to log"
-                raise Exception(msg)
+            try:
+                if self.memory_type == MemoryType.RSS:
+                    proc = psutil.Process()
+                    bytes_used = proc.memory_info().rss
+                    if self.include_child_processes:
+                        for child in proc.children(recursive=True):
+                            try:
+                                bytes_used += psutil.Process(child.pid).memory_info().rss
+                            except psutil.NoSuchProcess:
+                                # child terminated before measurement
+                                continue
+                elif self.memory_type == MemoryType.SYSTEM:
+                    vm = psutil.virtual_memory()
+                    bytes_used = vm.total - vm.available
+                else:
+                    msg = "Unknown memory type to log"
+                    raise Exception(msg)
+            except psutil.NoSuchProcess:
+                # this Process no longer exists; skip this iteration
+                bytes_used = 0
             if self._monitoring_thread_should_stop:
                 break
             self._memory_values_queue.put((time.perf_counter(), bytes_used))
